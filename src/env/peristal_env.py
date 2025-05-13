@@ -2,14 +2,15 @@ import numpy as np
 import genesis as gs
 
 ########################## init ##########################
-gs.init(seed=0, precision="32", logging_level="debug", backend="gpu")
+gs.init(seed=0, precision="32", logging_level="debug")
 
 ########################## create a scene ##########################
 scene = gs.Scene(
     sim_options=gs.options.SimOptions(
         dt=1e-2, # simulation time step. default=1e-2
         substeps=10,
-        gravity=(0, 0, 0), # gravity=(0, 0, -9.8),
+        # gravity=(0, 0, 0), 
+        gravity=(0, 0, -9.8),
     ),
     viewer_options=gs.options.ViewerOptions(
         camera_pos=(1.5, 0, 0.8),
@@ -35,7 +36,7 @@ scene.add_entity(
     ),
 )
 
-worm = scene.add_entity(
+pipe = scene.add_entity( # urdfのパイプを作る
     morph=gs.morphs.Mesh( # 形状をobjファイルから読み込む
         file="meshes/worm/worm.obj",
         pos=(0.3, 0.3, 0.001),
@@ -53,6 +54,23 @@ worm = scene.add_entity(
         diffuse_texture=gs.textures.ImageTexture(
             image_path="meshes/worm/bdy_Base_Color.png",
         ),
+    ),
+)
+
+food = scene.add_entity( # 食べ物を模したMPMの球体を追加する
+    material=gs.materials.MPM.Elastic(
+        E=5e4, # 高いほど硬い
+        nu=0.4, # 低いほど潰れやすい 0 < nu < 0.5
+        rho=1000.0,
+        model="neohooken",
+    ),  # 弾性材料
+    morph=gs.morphs.Sphere(
+        pos  = (0.0, -0.5, 0.25),  # 位置
+        radius=0.1, # 半径[m]
+    ),
+    surface=gs.surfaces.Default(
+        color    = (1.0, 0.4, 0.4),  # 色
+        vis_mode = 'visual',         # 視覚モード
     ),
 )
 
@@ -91,7 +109,55 @@ def set_muscle_by_pos(robot):
         muscle_direction=muscle_direction,
     )
 
-set_muscle_by_pos(worm)
+def set_intestines_muscle(robot, axial_divisions=10):
+    # 腸の筋肉を設定する関数
+    if isinstance(robot.material, gs.materials.MPM.Muscle): # robotがMPMの筋肉である場合
+        pos = robot.get_state().pos[0] # robotの位置を取得
+        n_units = robot.n_particles # robotの粒子数を取得
+    elif isinstance(robot.material, gs.materials.FEM.Muscle):
+        pos = robot.get_state().pos[0, robot.get_el2v()].mean(1)
+        n_units = robot.n_elements
+    else:
+        raise NotImplementedError
+
+    pos:np.ndarray = pos.cpu().numpy()
+    pos_max, pos_min = pos.max(0), pos.min(0) # 最大値と最小値を取得
+    pos_range = pos_max - pos_min
+    # 長さ1m
+    # 外半径4cm
+    # 内半径3cm
+    # 壁の厚み1cm
+    # 軸のxz平面上の位置
+    axis_coord = [pos_min[0] + pos_range[0] * 0.5, pos_min[1] + pos_range[1] * 0.5]
+    # 軸からの距離を計算
+    length_from_axis = np.sqrt((pos[:, 0] - axis_coord[0])**2 + (pos[:, 2] - axis_coord[1])**2)
+    # 軸からの角度を計算
+    angle_from_axis = np.arctan2(pos[:, 1] - axis_coord[1], pos[:, 0] - axis_coord[0])
+    # 0前後, 1左右, 2上下
+    muscle_group = np.zeros((n_units,), dtype=int) # ロボットを構成する粒子の数だけの配列を作成
+    # 半径3.5cmより外側を縦走筋とする。
+    mask_rad = length_from_axis > 0.035
+    for i in range(3):
+        for j in range(axial_divisions):
+            # 筋肉のグループを設定 領域を上書きしていくことで正しくmaskを設定する
+            muscle_group[
+                mask_rad &\
+                (angle_from_axis > (2*np.pi/3)*(3 - i)) &\
+                (pos[:, 1] - pos_min[1] > pos_range[1]*j/axial_divisions)
+            ] = i * axial_divisions + j
+    # それぞれの粒子に対して筋肉の方向を示すベクトルを作成
+    muscle_direction = np.zeros((n_units, 3), dtype=float)
+    # 筋肉の方向を設定
+    # 輪走筋はy軸周りの周方向のベクトル
+    muscle_direction[~mask_rad] = np.array([
+        np.cos(
+    # 筋肉グループと筋肉の方向をもとに、robotに筋肉を設定
+    robot.set_muscle(
+        muscle_group=muscle_group,
+        muscle_direction=muscle_direction,
+    )
+
+set_muscle_by_pos(pipe)
 
 ########################## run ##########################
 scene.reset()
@@ -99,5 +165,5 @@ for i in range(1000):
     # 筋肉の数（n_units, n_groups）と同じ形の駆動信号配列を作成
     actu = np.array([0, 0, 0, 1.0 * (0.5 + np.sin(0.005 * np.pi * i))])
 
-    worm.set_actuation(actu)
+    pipe.set_actuation(actu)
     scene.step()
