@@ -1,0 +1,1 @@
+ipython notebookなどでかんたんな検証を行うための場所
