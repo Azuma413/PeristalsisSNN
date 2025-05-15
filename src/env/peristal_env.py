@@ -3,15 +3,15 @@ import genesis as gs
 
 AXIAL_DIVISIONS = 5
 ########################## init ##########################
-gs.init(seed=0, precision="32", logging_level="debug")
+gs.init(seed=0, precision="32", debug=False, backend=gs.gpu)
 
 ########################## create a scene ##########################
 scene = gs.Scene(
     sim_options=gs.options.SimOptions(
         dt=1e-2, # simulation time step. default=1e-2
         substeps=10,
-        # gravity=(0, 0, 0), 
-        gravity=(0, 0, -9.8),
+        gravity=(0, 0, 0), 
+        # gravity=(0, 0, -9.8),
     ),
     viewer_options=gs.options.ViewerOptions(
         camera_pos=(1.5, 0, 0.8),
@@ -20,8 +20,8 @@ scene = gs.Scene(
     ),
     mpm_options=gs.options.MPMOptions(
         dt=5e-4,
-        lower_bound=(-1.0, -1.0, -0.2),
-        upper_bound=(1.0, 1.0, 1.0),
+        lower_bound=(-1.0, -1.0, -0.5),  # Z軸の下限を-0.5に拡大
+        upper_bound=(1.0, 4.0, 1.0),  # Y軸の上限を4.0に拡大
     ),
     vis_options=gs.options.VisOptions(
         show_world_frame=True,
@@ -30,18 +30,11 @@ scene = gs.Scene(
 )
 
 ########################## entities ##########################
-scene.add_entity(
-    morph=gs.morphs.Plane(),
-    material=gs.materials.Rigid(
-        coup_friction=5.0,
-    ),
-)
-
 pipe = scene.add_entity( # urdfのパイプを作る
-    morph=gs.morphs.Mesh( # 形状をstlファイルから読み込む
-        file="3d_models/cylinder_model.stl",
-        pos=(0.3, 0.3, 0.001),
-        scale=1.0,
+    morph=gs.morphs.Mesh(
+        file="3d_models/cylinder.obj",
+        pos=(0.0, -0.05, 0.0),
+        scale=0.1,
         euler=(0, 0, 0),
     ),
     material=gs.materials.MPM.Muscle(
@@ -50,10 +43,11 @@ pipe = scene.add_entity( # urdfのパイプを作る
         rho=10000.0, # 密度
         model="neohooken", # 応力モデル [corotation, neohooken]
         n_groups=6*AXIAL_DIVISIONS, # 筋肉のグループ数
+        sampler="pbs", # 粒子のサンプリング方法 "pbs", "random", "regular"
     ),
     surface=gs.surfaces.Default( # テクスチャの設定
-        color    = (1.0, 0.4, 0.4),  # 色
-        vis_mode = 'visual',         # 視覚モード
+        color    = (1.0, 0.4, 0.4, 0.5),  # 色
+        vis_mode = 'visual',  # visual or particle
     ),
 )
 
@@ -65,8 +59,8 @@ food = scene.add_entity( # 食べ物を模したMPMの球体を追加する
         model="neohooken",
     ),  # 弾性材料
     morph=gs.morphs.Sphere(
-        pos  = (0.0, -0.5, 0.25),  # 位置
-        radius=0.1, # 半径[m]
+        pos  = (0.0, 0.0, 0.0),  # 位置
+        radius=0.02, # 半径[m]
     ),
     surface=gs.surfaces.Default(
         color    = (0.8, 0.8, 0.4),  # 色
@@ -190,7 +184,35 @@ set_intestines_muscle(pipe, axial_divisions=AXIAL_DIVISIONS) # 腸の筋肉を�
 
 ########################## run ##########################
 scene.reset()
+
+# 蠕動運動のパラメータ
+wave_speed = 0.05  # 波の速度（小さいほど遅く進む）
+wave_length = 1.5  # 波の長さ（大きいほど長い波）
+contraction_strength = 3 # 収縮の強さ
+
 for i in range(1000):
-    actu = np.array([0, 0, 0, 1.0 * (0.5 + np.sin(0.005 * np.pi * i))])
+    # 各筋肉グループに対する駆動信号を作成
+    actu = np.zeros(6 * AXIAL_DIVISIONS)
+    actu[16:18] = 1.0 * (0.5 + np.sin(0.005 * np.pi * i))
+    
+    # # 縦走筋と輪走筋の協調的な動作を作成
+    # for j in range(AXIAL_DIVISIONS):
+    #     # 縦走筋はその位置より後ろの部分が収縮する（波が通過した後）
+    #     # 3つの縦走筋グループで同じパターン
+    #     for k in range(3):
+    #         # 波の位置に応じた駆動信号を計算
+    #         phase = wave_speed * i - j / AXIAL_DIVISIONS * wave_length
+    #         longitudinal_signal = 0.5 + 0.5 * np.tanh((phase) * 2) # シグモイド関数で滑らかに変化
+    #         # グループIDに対応する駆動信号を設定
+    #         actu[k * AXIAL_DIVISIONS + j] = 0 # contraction_strength * longitudinal_signal
+        
+    #     # 輪走筋は波の通過中に収縮する（波の位置）
+    #     for k in range(3):
+    #         # 波の位置に応じた駆動信号を計算
+    #         phase = wave_speed * i - j / AXIAL_DIVISIONS * wave_length
+    #         circular_signal = 0.5 - 0.5 * np.cos(phase * np.pi) * np.exp(-0.5 * (phase - 0.5)**2)
+    #         # 輪走筋が収縮するタイミングは縦走筋とは異なる
+    #         actu[3 * AXIAL_DIVISIONS + k * AXIAL_DIVISIONS + j] = contraction_strength * circular_signal
+    
     pipe.set_actuation(actu)
     scene.step()
