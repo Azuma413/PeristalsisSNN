@@ -3,15 +3,15 @@ SNNを強化学習して腸の蠕動運動を再現しようという試み。
 
 ## セットアップ
 ```bash
-git clone --recurse-submodules https://github.com/Azuma413/Genesis_Azuma413.git
+git clone --recurse-submodules https://github.com/Azuma413/PeristalsisSNN.git
 uv sync
-uv pip install -e "/Genesis_Azuma413/.[dev]"
+uv pip install -e "Genesis_Azuma413/.[dev]"
 ```
 pytorchのcudaが有効化されているか確認
 ```bash
 uv run python -c "import torch; print(torch.cuda.is_available())"
 ```
-
+Trueと出力されればOK
 ## memo
 腸・ニューロンモデルの作成
 
