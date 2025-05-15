@@ -16,6 +16,8 @@ Trueと出力されればOK
 
 ## TODO
 - [ ] peristal envをgymでwrapする。（[ここらへん](https://github.com/Azuma413/sound_dp/blob/main/env/genesis_env.py)を参照）
+- [ ] 圧力を取得できるようにする
+- [ ] 神経モデル（spikingjelly）との接続
 
 ## memo
 腸・ニューロンモデルの作成

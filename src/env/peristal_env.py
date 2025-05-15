@@ -1,5 +1,7 @@
 import numpy as np
 import genesis as gs
+import cv2
+from datetime import datetime
 
 AXIAL_DIVISIONS = 5
 ########################## init ##########################
@@ -22,6 +24,7 @@ scene = gs.Scene(
         dt=5e-4,
         lower_bound=(-1.0, -1.0, -0.5),  # Z軸の下限を-0.5に拡大
         upper_bound=(1.0, 4.0, 1.0),  # Y軸の上限を4.0に拡大
+        grid_density=128, # 粒子の密度 default=64
     ),
     vis_options=gs.options.VisOptions(
         show_world_frame=True,
@@ -32,10 +35,10 @@ scene = gs.Scene(
 ########################## entities ##########################
 pipe = scene.add_entity( # urdfのパイプを作る
     morph=gs.morphs.Mesh(
-        file="3d_models/cylinder.obj",
+        file="3d_models/cylinder_model.stl", # STLファイルのパス
         pos=(0.0, -0.05, 0.0),
-        scale=0.1,
-        euler=(0, 0, 0),
+        scale=0.001,
+        euler=(0, 90, 90),
     ),
     material=gs.materials.MPM.Muscle(
         E=5e5, # ヤング率
@@ -46,7 +49,7 @@ pipe = scene.add_entity( # urdfのパイプを作る
         sampler="pbs", # 粒子のサンプリング方法 "pbs", "random", "regular"
     ),
     surface=gs.surfaces.Default( # テクスチャの設定
-        color    = (1.0, 0.4, 0.4, 0.5),  # 色
+        color    = (1.0, 0.4, 0.4, 0.6),  # 色
         vis_mode = 'visual',  # visual or particle
     ),
 )
@@ -60,12 +63,20 @@ food = scene.add_entity( # 食べ物を模したMPMの球体を追加する
     ),  # 弾性材料
     morph=gs.morphs.Sphere(
         pos  = (0.0, 0.0, 0.0),  # 位置
-        radius=0.02, # 半径[m]
+        radius=0.025, # 半径[m]
     ),
     surface=gs.surfaces.Default(
         color    = (0.8, 0.8, 0.4),  # 色
         vis_mode = 'visual',         # 視覚モード
     ),
+)
+
+cam = scene.add_camera(
+    res=(1920, 1080),
+    pos=(0.5, 0.1, 0.0),
+    lookat=(0.0, 0.1, 0.0),
+    fov=40,
+    GUI=False
 )
 
 ########################## build ##########################
@@ -96,30 +107,29 @@ def set_intestines_muscle(robot, axial_divisions=10):
     pos: np.ndarray = pos.cpu().numpy()
     pos_max, pos_min = pos.max(0), pos.min(0) # 最大値と最小値を取得
     pos_range = pos_max - pos_min
+    axis_center = (pos_max + pos_min) * 0.5 # 中心点を計算
+    
+    print(f"units: {n_units}, pos_min: {pos_min}, pos_range: {pos_range}, center: {axis_center}")
     
     # 長さ30cm
     # 外半径4cm
     # 内半径3cm
     # 壁の厚み1cm
     
-    # 軸のxy平面上の位置（中心点）を計算
-    axis_center_x = pos_min[0] + pos_range[0] * 0.5
-    axis_center_z = pos_min[2] + pos_range[2] * 0.5
-    
     # 軸からの距離を計算（xz平面上での距離）
-    length_from_axis = np.sqrt((pos[:, 0] - axis_center_x)**2 + (pos[:, 2] - axis_center_z)**2)
-    
+    length_from_axis = np.sqrt((pos[:, 0] - axis_center[0])**2 + (pos[:, 2] - axis_center[2])**2)
     # 軸からの角度を計算（xz平面上での角度）
-    angle_from_axis = np.arctan2(pos[:, 2] - axis_center_z, pos[:, 0] - axis_center_x)
+    angle_from_axis = np.arctan2(pos[:, 2] - axis_center[2], pos[:, 0] - axis_center[0])
+    print(f"max length_from_axis: {length_from_axis.max()}, min length_from_axis: {length_from_axis.min()}")
     # 角度の範囲を[0, 2π]に調整
     angle_from_axis = (angle_from_axis + 2 * np.pi) % (2 * np.pi)
-    
     # ロボットを構成する粒子の数だけの配列を作成
     muscle_group = np.zeros((n_units,), dtype=int)
-    
     # 半径3.5cmより外側を縦走筋、内側を輪走筋とする
-    mask_longitudinal = length_from_axis > 0.035  # 縦走筋のマスク
+    mask_longitudinal = length_from_axis > 0.0354  # 縦走筋のマスク
     mask_circular = ~mask_longitudinal  # 輪走筋のマスク
+    
+    print(f"mask_longitudinal: {mask_longitudinal.sum()}, mask_circular: {mask_circular.sum()}")
     
     # 縦走筋の設定（円周方向に120度ずつ3分割、軸方向にaxial_divisions分割）
     for i in range(3):  # 円周方向の3分割
@@ -151,6 +161,10 @@ def set_intestines_muscle(robot, axial_divisions=10):
             group_id = 3 * axial_divisions + i * axial_divisions + j
             muscle_group[mask_circular & mask_angle & mask_y] = group_id
     
+    # IDごとの粒子数を表示
+    for i in range(6 * axial_divisions):
+        print(f"muscle_group {i}: {np.sum(muscle_group == i)}")
+    
     # それぞれの粒子に対して筋肉の方向を示すベクトルを作成
     muscle_direction = np.zeros((n_units, 3), dtype=float)
     
@@ -163,9 +177,9 @@ def set_intestines_muscle(robot, axial_divisions=10):
         if mask_circular[i]:
             # 中心からの方向ベクトル（xz平面上）
             radial_vector = np.array([
-                pos[i, 0] - axis_center_x,
+                pos[i, 0] - axis_center[0],
                 0,
-                pos[i, 2] - axis_center_z
+                pos[i, 2] - axis_center[2]
             ])
             # 正規化
             if np.linalg.norm(radial_vector) > 0:
@@ -188,31 +202,58 @@ scene.reset()
 # 蠕動運動のパラメータ
 wave_speed = 0.05  # 波の速度（小さいほど遅く進む）
 wave_length = 1.5  # 波の長さ（大きいほど長い波）
-contraction_strength = 3 # 収縮の強さ
+contraction_strength = 1 # 収縮の強さ
 
-for i in range(1000):
+frames = []
+
+for i in range(100):
     # 各筋肉グループに対する駆動信号を作成
     actu = np.zeros(6 * AXIAL_DIVISIONS)
-    actu[16:18] = 1.0 * (0.5 + np.sin(0.005 * np.pi * i))
+    # actu[15] = 1.0 * (0.5 + np.sin(0.005 * np.pi * i))
+    # actu[15 + AXIAL_DIVISIONS] = 1.0 * (0.5 + np.sin(0.005 * np.pi * i))
+    # actu[15 + 2 * AXIAL_DIVISIONS] = 1.0 * (0.5 + np.sin(0.005 * np.pi * i))
     
-    # # 縦走筋と輪走筋の協調的な動作を作成
-    # for j in range(AXIAL_DIVISIONS):
-    #     # 縦走筋はその位置より後ろの部分が収縮する（波が通過した後）
-    #     # 3つの縦走筋グループで同じパターン
-    #     for k in range(3):
-    #         # 波の位置に応じた駆動信号を計算
-    #         phase = wave_speed * i - j / AXIAL_DIVISIONS * wave_length
-    #         longitudinal_signal = 0.5 + 0.5 * np.tanh((phase) * 2) # シグモイド関数で滑らかに変化
-    #         # グループIDに対応する駆動信号を設定
-    #         actu[k * AXIAL_DIVISIONS + j] = 0 # contraction_strength * longitudinal_signal
+    # 縦走筋と輪走筋の協調的な動作を作成
+    for j in range(AXIAL_DIVISIONS):
+        # 縦走筋はその位置より後ろの部分が収縮する（波が通過した後）
+        # 3つの縦走筋グループで同じパターン
+        for k in range(3):
+            # 波の位置に応じた駆動信号を計算
+            phase = wave_speed * i - j / AXIAL_DIVISIONS * wave_length
+            longitudinal_signal = 0.5 + 0.5 * np.tanh((phase) * 2) # シグモイド関数で滑らかに変化
+            # グループIDに対応する駆動信号を設定
+            actu[k * AXIAL_DIVISIONS + j] = contraction_strength * longitudinal_signal
         
-    #     # 輪走筋は波の通過中に収縮する（波の位置）
-    #     for k in range(3):
-    #         # 波の位置に応じた駆動信号を計算
-    #         phase = wave_speed * i - j / AXIAL_DIVISIONS * wave_length
-    #         circular_signal = 0.5 - 0.5 * np.cos(phase * np.pi) * np.exp(-0.5 * (phase - 0.5)**2)
-    #         # 輪走筋が収縮するタイミングは縦走筋とは異なる
-    #         actu[3 * AXIAL_DIVISIONS + k * AXIAL_DIVISIONS + j] = contraction_strength * circular_signal
+        # 輪走筋は波の通過中に収縮する（波の位置）
+        for k in range(3):
+            # 波の位置に応じた駆動信号を計算
+            phase = wave_speed * i - j / AXIAL_DIVISIONS * wave_length
+            circular_signal = 0.5 - 0.5 * np.cos(phase * np.pi) * np.exp(-0.5 * (phase - 0.5)**2)
+            # 輪走筋が収縮するタイミングは縦走筋とは異なる
+            actu[3 * AXIAL_DIVISIONS + k * AXIAL_DIVISIONS + j] = contraction_strength * circular_signal
     
     pipe.set_actuation(actu)
     scene.step()
+    frames.append(cam.render()[0])
+
+# 動画を保存
+output_path = f"peristalsis_simulation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+print(f"動画を保存しています: {output_path}")
+
+# 最初のフレームから動画の属性を取得
+height, width, _ = frames[0].shape
+fps = 30  # フレームレート（1秒あたりのフレーム数）
+
+# VideoWriterオブジェクトを作成
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # コーデックを指定
+video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+# 各フレームを書き込む
+for frame in frames:
+    # OpenCVはBGR形式を使用、NumPy配列はRGB形式なので変換が必要
+    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    video_writer.write(frame_bgr)
+
+# VideoWriterオブジェクトを解放
+video_writer.release()
+print(f"動画の保存が完了しました: {output_path}")
