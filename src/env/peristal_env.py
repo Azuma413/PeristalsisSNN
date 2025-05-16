@@ -1,7 +1,39 @@
 import numpy as np
 import genesis as gs
-import cv2
-from datetime import datetime
+from genesis.engine.entities.mpm_entity import MPMEntity
+from genesis.engine.states.entities import MPMEntityState
+from gymnasium import spaces
+import gymnasium as gym
+
+class PeristalsisEnv(gym.Env):
+    def __init__(self, obs_height=1280, obs_width=720, show_viewer=False, axial_divisions=5):
+        super().__init__()
+        self.show_viewer = show_viewer
+        self.obs_height = obs_height
+        self.obs_width = obs_width
+        self.axial_divisions = axial_divisions
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6 * axial_divisions,), dtype=np.float32)
+        # 一旦適当。輪走筋グループの領域ごとにかかる応力の平均値を観測として与える
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(3 * axial_divisions,), dtype=np.float32)
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        # hogehoge
+        # return observation, info
+    def step(self, action):
+        pass
+        # if episode is done
+        # info["is_success"] = True
+        # return observation, reward, terminated, truncated, info
+    def save_video(self, file_name:str="save", fps=30):
+        # 動画を保存する関数
+        pass
+    def close(self):
+        pass
+    def render(self):
+        # return obs
+        pass
+
+
 
 AXIAL_DIVISIONS = 5
 ########################## init ##########################
@@ -33,7 +65,7 @@ scene = gs.Scene(
 )
 
 ########################## entities ##########################
-pipe = scene.add_entity( # urdfのパイプを作る
+pipe:MPMEntity = scene.add_entity( # urdfのパイプを作る
     morph=gs.morphs.Mesh(
         file="3d_models/cylinder_model.stl", # STLファイルのパス
         pos=(0.0, -0.05, 0.0),
@@ -54,7 +86,7 @@ pipe = scene.add_entity( # urdfのパイプを作る
     ),
 )
 
-food = scene.add_entity( # 食べ物を模したMPMの球体を追加する
+food:MPMEntity = scene.add_entity( # 食べ物を模したMPMの球体を追加する
     material=gs.materials.MPM.Elastic(
         E=5e4, # 高いほど硬い
         nu=0.4, # 低いほど潰れやすい 0 < nu < 0.5
@@ -84,7 +116,7 @@ scene.build(n_envs=1)
 
 ########################## set muscle ##########################
 
-def set_intestines_muscle(robot, axial_divisions=10):
+def set_intestines_muscle(robot:MPMEntity, axial_divisions=10):
     """
     腸の筋肉を設定する関数
     
@@ -98,18 +130,15 @@ def set_intestines_muscle(robot, axial_divisions=10):
     if isinstance(robot.material, gs.materials.MPM.Muscle): # robotがMPMの筋肉である場合
         pos = robot.get_state().pos[0] # robotの位置を取得
         n_units = robot.n_particles # robotの粒子数を取得
-    elif isinstance(robot.material, gs.materials.FEM.Muscle):
-        pos = robot.get_state().pos[0, robot.get_el2v()].mean(1)
-        n_units = robot.n_elements
     else:
         raise NotImplementedError
 
-    pos: np.ndarray = pos.cpu().numpy()
+    pos:np.ndarray = pos.cpu().numpy()
     pos_max, pos_min = pos.max(0), pos.min(0) # 最大値と最小値を取得
     pos_range = pos_max - pos_min
     axis_center = (pos_max + pos_min) * 0.5 # 中心点を計算
     
-    print(f"units: {n_units}, pos_min: {pos_min}, pos_range: {pos_range}, center: {axis_center}")
+    # print(f"units: {n_units}, pos_min: {pos_min}, pos_range: {pos_range}, center: {axis_center}")
     
     # 長さ30cm
     # 外半径4cm
@@ -120,7 +149,7 @@ def set_intestines_muscle(robot, axial_divisions=10):
     length_from_axis = np.sqrt((pos[:, 0] - axis_center[0])**2 + (pos[:, 2] - axis_center[2])**2)
     # 軸からの角度を計算（xz平面上での角度）
     angle_from_axis = np.arctan2(pos[:, 2] - axis_center[2], pos[:, 0] - axis_center[0])
-    print(f"max length_from_axis: {length_from_axis.max()}, min length_from_axis: {length_from_axis.min()}")
+    # print(f"max length_from_axis: {length_from_axis.max()}, min length_from_axis: {length_from_axis.min()}")
     # 角度の範囲を[0, 2π]に調整
     angle_from_axis = (angle_from_axis + 2 * np.pi) % (2 * np.pi)
     # ロボットを構成する粒子の数だけの配列を作成
@@ -129,7 +158,7 @@ def set_intestines_muscle(robot, axial_divisions=10):
     mask_longitudinal = length_from_axis > 0.0354  # 縦走筋のマスク
     mask_circular = ~mask_longitudinal  # 輪走筋のマスク
     
-    print(f"mask_longitudinal: {mask_longitudinal.sum()}, mask_circular: {mask_circular.sum()}")
+    # print(f"mask_longitudinal: {mask_longitudinal.sum()}, mask_circular: {mask_circular.sum()}")
     
     # 縦走筋の設定（円周方向に120度ずつ3分割、軸方向にaxial_divisions分割）
     for i in range(3):  # 円周方向の3分割
@@ -162,8 +191,8 @@ def set_intestines_muscle(robot, axial_divisions=10):
             muscle_group[mask_circular & mask_angle & mask_y] = group_id
     
     # IDごとの粒子数を表示
-    for i in range(6 * axial_divisions):
-        print(f"muscle_group {i}: {np.sum(muscle_group == i)}")
+    # for i in range(6 * axial_divisions):
+    #     print(f"muscle_group {i}: {np.sum(muscle_group == i)}")
     
     # それぞれの粒子に対して筋肉の方向を示すベクトルを作成
     muscle_direction = np.zeros((n_units, 3), dtype=float)
@@ -206,7 +235,7 @@ contraction_strength = 1 # 収縮の強さ
 
 frames = []
 
-for i in range(100):
+for i in range(1):
     # 各筋肉グループに対する駆動信号を作成
     actu = np.zeros(6 * AXIAL_DIVISIONS)
     # actu[15] = 1.0 * (0.5 + np.sin(0.005 * np.pi * i))
@@ -234,26 +263,29 @@ for i in range(100):
     
     pipe.set_actuation(actu)
     scene.step()
+    state:MPMEntityState = pipe.get_state()
+    stress = pipe.solver.get_stress()
+    print(stress.shape)
     frames.append(cam.render()[0])
 
-# 動画を保存
-output_path = f"peristalsis_simulation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-print(f"動画を保存しています: {output_path}")
+# # 動画を保存
+# output_path = f"peristalsis_simulation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+# print(f"動画を保存しています: {output_path}")
 
-# 最初のフレームから動画の属性を取得
-height, width, _ = frames[0].shape
-fps = 30  # フレームレート（1秒あたりのフレーム数）
+# # 最初のフレームから動画の属性を取得
+# height, width, _ = frames[0].shape
+# fps = 30  # フレームレート（1秒あたりのフレーム数）
 
-# VideoWriterオブジェクトを作成
-fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # コーデックを指定
-video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+# # VideoWriterオブジェクトを作成
+# fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # コーデックを指定
+# video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-# 各フレームを書き込む
-for frame in frames:
-    # OpenCVはBGR形式を使用、NumPy配列はRGB形式なので変換が必要
-    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    video_writer.write(frame_bgr)
+# # 各フレームを書き込む
+# for frame in frames:
+#     # OpenCVはBGR形式を使用、NumPy配列はRGB形式なので変換が必要
+#     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+#     video_writer.write(frame_bgr)
 
-# VideoWriterオブジェクトを解放
-video_writer.release()
-print(f"動画の保存が完了しました: {output_path}")
+# # VideoWriterオブジェクトを解放
+# video_writer.release()
+# print(f"動画の保存が完了しました: {output_path}")
