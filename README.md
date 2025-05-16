@@ -23,18 +23,7 @@ Trueと出力されればOK
 ## memo
 ### gs.MPMEntityState
 - アフィン速度勾配
-'C': <genesis.grad.tensor.Tensor>, shape: torch.Size([1, 5339, 3, 3])
-- 変形勾配
-'F': <genesis.grad.tensor.Tensor>, shape: torch.Size([1, 5339, 3, 3])
-- 塑性ヤコビアン
-'Jp': <genesis.grad.tensor.Tensor>, shape: torch.Size([1, 5339])
-- 位置
-'pos': <genesis.grad.tensor.Tensor>, shape: torch.Size([1, 5339, 3])
-- 速度
-'vel': <genesis.grad.tensor.Tensor>, shape: torch.Size([1, 5339, 3])
-
-### 腸壁の感覚ニューロンが受け取る信号
-ニューロンが受け取るのは（化学的刺激を無視すれば）機械的刺激であり、その場合、変形か応力を入力信号として用いることが考えられる。
+'C': <genesis.grad.tensor.Tensor>, shape: torch.Size(i.tり、その場合、変形か応力を入力信号として用いることが考えられる。
 ここでは、変形勾配よりも応力が腸壁への刺激を直接的に表現していると判断して、応力を採用する。
 
 DANやMDC-SANが有名アルゴリズム？
