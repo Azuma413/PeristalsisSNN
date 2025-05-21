@@ -44,11 +44,12 @@ class PeristalsisEnv(gym.Env):
 
     def _setup_scene(self):
         """シミュレーションのシーンを設定"""
+        epsilon = 0.015 # これより小さくするとエラー
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(
-                dt=1e-2,
+                dt=1/30, # 1e-2,
                 substeps=10,
-                gravity=(0, 0, -9.8),
+                gravity=(0, 0, 0),
             ),
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(1.5, 0, 0.8),
@@ -57,9 +58,9 @@ class PeristalsisEnv(gym.Env):
             ),
             mpm_options=gs.options.MPMOptions(
                 dt=1e-4, # 5e-4
-                lower_bound=(-1.0, -1.0, -0.5),
-                upper_bound=(1.0, 4.0, 1.0),
-                grid_density=128, # 128
+                lower_bound=(-0.04-epsilon, -0.05-epsilon, -0.04-epsilon),
+                upper_bound=(0.04+epsilon, 0.25+epsilon, 0.04+epsilon),
+                grid_density=256, # 192
             ),
             vis_options=gs.options.VisOptions(
                 show_world_frame=True,
@@ -105,20 +106,21 @@ class PeristalsisEnv(gym.Env):
         )
 
         # 食べ物の追加
-        self.food:RigidEntity = self.scene.add_entity(
-            # material=gs.materials.MPM.Elastic(
-            #     E=1e6,
-            #     nu=0.45,
-            #     rho=1000.0,
-            #     model="neohooken",
-            # ),
+        # self.food:RigidEntity = self.scene.add_entity(
+        self.food:MPMEntity = self.scene.add_entity(
+            material=gs.materials.MPM.Elastic(
+                E=5e5,
+                nu=0.45,
+                rho=1000.0,
+                model="neohooken",
+            ),
             morph=gs.morphs.Sphere(
                 pos=(0.0, 0.0, 0.0),
-                radius=0.02,
+                radius=0.025,
             ),
             surface=gs.surfaces.Default(
                 color=(0.8, 0.8, 0.4),
-                vis_mode='visual',
+                vis_mode='particle',
             ),
         )
 
@@ -167,7 +169,9 @@ class PeristalsisEnv(gym.Env):
         self._setup_muscle()
 
         # 食べ物の初期位置を記録
-        self.food_initial_pos = self.food.get_pos()[0].cpu().numpy()
+        # self.food_initial_pos = self.food.get_pos()[0].cpu().numpy()
+        self.food_initial_pos = np.mean(self.food.get_state().pos[0].cpu().numpy(), axis=0)
+        # print(self.food_initial_pos.shape)
 
         # 初期観測を取得
         observation = self._get_observation()
@@ -183,9 +187,11 @@ class PeristalsisEnv(gym.Env):
         self.current_step += 1
 
         # 食べ物の現在位置を取得
-        food_current_pos = self.food.get_pos()[0].cpu().numpy()
+        # food_current_pos = self.food.get_pos()[0].cpu().numpy()
+        food_current_pos = np.mean(self.food.get_state().pos[0].cpu().numpy(), axis=0)
 
         # 報酬計算：Y軸方向の移動距離
+        # print(f"food diff: {food_current_pos - self.food_initial_pos}")
         reward = food_current_pos[1] - self.food_initial_pos[1]
         reward *= 10.0
 
@@ -344,27 +350,29 @@ def set_intestines_muscle(robot:MPMEntity, axial_divisions=10):
 if __name__ == "__main__":
     # テスト用コード
     AXIAL_DIVISIONS = 5
-    save_frames = False
+    save_frames = True
     env = PeristalsisEnv(axial_divisions=AXIAL_DIVISIONS, show_viewer=True)
     env.reset()
     frames = []
     observations = []
-    wave_speed = 0.5 # [hz]
-    longitudinal_strength = 1.0  # 縦走筋の収縮強度
-    circular_strength = 0.0 # 輪走筋の収縮強度
-    wave_length = 0.5  # 波の長さ
+    wave_speed = 0.15 # [hz]
+    strength = 0.35 # 筋の収縮強度
+    rate = 0.8
     # シミュレーション実行
-    for i in range(1000):
+    for i in range(600):
         # 各筋肉グループに対する駆動信号を作成
         actu = np.zeros(6 * AXIAL_DIVISIONS)
         for j in range(AXIAL_DIVISIONS):
-            phase = np.sin(wave_speed / 15 * np.pi * i + j * 2*np.pi / AXIAL_DIVISIONS)  # 波の位相
-            actu[0+j] = phase * longitudinal_strength
-            actu[5+j] = phase * longitudinal_strength
-            actu[10+j] = phase * longitudinal_strength
-            actu[15+j] = phase * circular_strength
-            actu[20+j] = phase * circular_strength
-            actu[25+j] = phase * circular_strength
+            phase = np.sin(wave_speed/15*np.pi*i + j*np.pi/AXIAL_DIVISIONS)  # 波の位相
+            index = (j + 1)%5
+            actu[0+index] = phase * strength
+            actu[5+index] = phase * strength
+            actu[10+index] = phase * strength
+            phase = np.sin(wave_speed/15*np.pi*i + j*np.pi/AXIAL_DIVISIONS)  # 波の位相
+            index = AXIAL_DIVISIONS-j-1
+            actu[15+index] = phase * strength * rate
+            actu[20+index] = phase * strength * rate
+            actu[25+index] = phase * strength * rate
         obs, reward, terminated, truncated, info = env.step(actu)
         print(f"Step: {i}, Reward: {reward}")
         observations.append(obs)
