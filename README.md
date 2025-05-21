@@ -15,15 +15,15 @@ uv run python -c "import torch; print(torch.cuda.is_available())"
 Trueと出力されればOK
 
 ## TODO
-- [ ] peristal envをgymでwrapする。（[ここらへん](https://github.com/Azuma413/sound_dp/blob/main/env/genesis_env.py)を参照）
+- [x] peristal envをgymでwrapする。（[ここらへん](https://github.com/Azuma413/sound_dp/blob/main/env/genesis_env.py)を参照）
 - [x] 圧力を取得できるようにする [参考](https://genesis-world.readthedocs.io/en/latest/_modules/genesis/engine/entities/mpm_entity.html#MPMEntity.get_state)
 - [ ] 腸モデルを空間に固定する（ベストは軸中心に固定、難しければ空間固定した円形の剛体などで囲む）
 - [ ] 神経モデル（spikingjelly）との接続
+- [ ] 接触部分がうまく行っているかわからない。ルールベースで検証したい。
+- [ ] 塑性変形テンソルを観測として用いるとして、それをそのまま使うのか、前回の値との差を用いるのか。
 
 ## memo
 ### gs.MPMEntityState
-- アフィン速度勾配
-'C': <genesis.grad.tensor.Tensor>, shape: torch.Size(i.tり、その場合、変形か応力を入力信号として用いることが考えられる。
-ここでは、変形勾配よりも応力が腸壁への刺激を直接的に表現していると判断して、応力を採用する。
+応力より変形勾配のほうが、直接的に細胞への機械刺激を表現している。
 
 DANやMDC-SANが有名アルゴリズム？
