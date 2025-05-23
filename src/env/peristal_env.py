@@ -10,7 +10,9 @@ import cv2
 from datetime import datetime
 
 class PeristalsisEnv(gym.Env):
-    def __init__(self, img_height=1280, img_width=720, show_viewer=False, axial_divisions=5, max_steps=1000):
+    metadata = {"render_modes": ["rgb_array", "human"], "render_fps": 30}
+
+    def __init__(self, img_height=1280, img_width=720, show_viewer=False, axial_divisions=5, max_steps=600):
         """
         腸の蠕動運動シミュレーション環境の初期化
 
@@ -22,6 +24,7 @@ class PeristalsisEnv(gym.Env):
             max_steps (int): エピソードの最大ステップ数
         """
         super().__init__()
+        self.render_mode = "rgb_array"  # VecVideoRecorder のために "rgb_array" を設定
         self.show_viewer = show_viewer
         self.img_height = img_height
         self.img_width = img_width
@@ -32,15 +35,16 @@ class PeristalsisEnv(gym.Env):
         # アクション空間: 6*axial_divisions個の筋肉グループの収縮率
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6 * axial_divisions,), dtype=np.float32)
         # 観測空間: 3*axial_divisions個の領域の応力平均値
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(3 * axial_divisions,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(3 * axial_divisions,), dtype=np.float32)
         
         # シーンと環境の初期化
         self.scene = None
         self.pipe = None
         self.food = None
         self.cam = None
-        self.food_initial_pos = None
+        self.food_prior_pos = None
         self.muscle_group = None
+        self.prior_area_F = None
 
     def _setup_scene(self):
         """シミュレーションのシーンを設定"""
@@ -142,20 +146,24 @@ class PeristalsisEnv(gym.Env):
 
     def _get_observation(self):
         """現在の状態の観測を取得"""
-        # パイプの変形勾配を取得
         F = self.pipe.get_state().F[0].cpu().numpy()
-        # pos = self.pipe.get_state().pos[0].cpu().numpy()
-        obs = np.zeros((3 * self.axial_divisions,), dtype=np.float32)
+        if np.any(np.isnan(F)):
+            print("FにNaNが含まれています。")
+            return None
+        area_F = np.zeros((3 * self.axial_divisions,), dtype=np.float32)
         for i in range(3*self.axial_divisions, 6*self.axial_divisions):
-            # 各筋肉グループの粒子のインデックスを取得
             group_indices = np.where(self.muscle_group == i)[0]
             if len(group_indices) > 0:
-                # 各筋肉グループを平均化
-                obs[i - 3*self.axial_divisions] = np.mean(F[group_indices, 1])
-        # 観測値を0-1の範囲に正規化
-        max_F = obs.max()
-        if max_F > 0:
-            obs = obs / max_F
+                area_F[i - 3*self.axial_divisions] = np.mean(F[group_indices, 1])
+            else:
+                return None
+        area_F -= 1/3
+        diff_area_F = area_F - self.prior_area_F
+        self.prior_area_F = area_F.copy()
+        alpha = 0.1
+        obs = alpha * area_F + (1 - alpha) * diff_area_F
+        scale = 500.0
+        obs = np.tanh(obs*scale)
         return obs
 
     def reset(self, seed=None, options=None):
@@ -164,39 +172,58 @@ class PeristalsisEnv(gym.Env):
         self.current_step = 0
 
         # シーンの初期化
-        gs.init(seed=seed, precision="32", debug=False, backend=gs.gpu)
-        self._setup_scene()
-        self._setup_muscle()
+        if gs._initialized and self.scene is not None:
+            self.scene.reset()
+        else:
+            if gs._initialized:
+                gs.destroy()
+            # Genesisの初期化
+            gs.init(seed=seed, precision="32", debug=False, backend=gs.gpu, logging_level="WARNING")
+            self._setup_scene()
+            self._setup_muscle()
 
         # 食べ物の初期位置を記録
-        # self.food_initial_pos = self.food.get_pos()[0].cpu().numpy()
-        self.food_initial_pos = np.mean(self.food.get_state().pos[0].cpu().numpy(), axis=0)
-        # print(self.food_initial_pos.shape)
+        # self.food_prior_pos = self.food.get_pos()[0].cpu().numpy()
+        self.food_prior_pos = np.mean(self.food.get_state().pos[0].cpu().numpy(), axis=0)
+        # print(self.food_prior_pos.shape)
+        self.prior_area_F = np.zeros((3 * self.axial_divisions,), dtype=np.float32)
 
         # 初期観測を取得
         observation = self._get_observation()
+        print(f"reset直後のobservation: min={observation.min()}, max={observation.max()}, NaN={np.any(np.isnan(observation))}")
         info = {}
 
         return observation, info
 
     def step(self, action):
         """環境を1ステップ進める"""
+        action_scale = 0.35
         # アクションの適用
-        self.pipe.set_actuation(action)
+        self.pipe.set_actuation(action*action_scale)
         self.scene.step()
         self.current_step += 1
 
         # 食べ物の現在位置を取得
-        # food_current_pos = self.food.get_pos()[0].cpu().numpy()
         food_current_pos = np.mean(self.food.get_state().pos[0].cpu().numpy(), axis=0)
 
         # 報酬計算：Y軸方向の移動距離
-        # print(f"food diff: {food_current_pos - self.food_initial_pos}")
-        reward = food_current_pos[1] - self.food_initial_pos[1]
-        reward *= 10.0
+        reward = food_current_pos[1] - self.food_prior_pos[1]
+        self.food_prior_pos = food_current_pos
+        reward *= 1000.0 # 要調整
+        print(f"reward: {reward}")
+        reward = np.tanh(reward)
 
         # 観測取得
         observation = self._get_observation()
+
+        # FにNaNが含まれる場合は罰則・終了
+        if observation is None:
+            observation = np.zeros((3 * self.axial_divisions,), dtype=np.float32)
+            reward = -1.0
+            terminated = True
+            truncated = True
+            info = {"error": "MPM simulation breakdown"}
+            return observation, reward, terminated, truncated, info
 
         # 終了判定
         terminated = self.current_step >= self.max_steps
@@ -213,8 +240,9 @@ class PeristalsisEnv(gym.Env):
         """環境をクリーンアップ"""
         if self.scene is not None:
             del self.scene
+        gs.destroy()
 
-    def render(self):
+    def render(self, mode="rgb_array"):
         """環境の現在の状態をレンダリング"""
         if self.cam is None:
             return None

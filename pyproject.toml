@@ -6,5 +6,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "gymnasium>=1.1.1",
+    "ipykernel>=6.29.5",
     "spikingjelly>=0.0.0.0.14",
+    "stable-baselines3>=2.6.0",
+    "tensorboard>=2.19.0",
+    "wandb>=0.19.11",
 ]
