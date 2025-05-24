@@ -19,7 +19,7 @@ def train():
     # --- 設定 ---
     config = {
         "policy_type": "MlpPolicy",
-        "total_timesteps": 1_000_000, # 総学習ステップ数
+        "total_timesteps": 10000000, # 総学習ステップ数
         "env_id": "PeristalsisEnv-v0",
         "axial_divisions": 5, # 環境の軸方向の分割数
         "img_height": 240, # 環境の観測画像の高さ (動画記録用)
@@ -76,11 +76,9 @@ def train():
         tau=config["sac_tau"],
         train_freq=config["sac_train_freq"],
         gradient_steps=config["sac_gradient_steps"],
-        policy_kwargs=dict(net_arch=[64, 64]), # ネットワークアーキテクチャをカスタマイズ
         verbose=1,
         tensorboard_log=log_dir, # WandBと同期するためにTensorBoardログも出力
         device=device, # torch.cuda.is_available() を使用
-        # max_grad_norm=0.5, # SACのコンストラクタにこの引数はないため削除
     )
 
     # WandbCallback: 学習のメトリクス、ハイパーパラメータ、動画などをWandBにロギング

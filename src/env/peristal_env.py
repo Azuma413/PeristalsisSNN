@@ -209,7 +209,7 @@ class PeristalsisEnv(gym.Env):
         # 報酬計算：Y軸方向の移動距離
         reward = food_current_pos[1] - self.food_prior_pos[1]
         self.food_prior_pos = food_current_pos
-        reward *= 1000.0 # 要調整
+        reward *= 5000.0 # 要調整
         print(f"reward: {reward}")
         reward = np.tanh(reward)
 

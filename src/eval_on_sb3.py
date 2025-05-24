@@ -1,5 +1,5 @@
 # 学習済みSACポリシーを使って環境を動作させ、動画を保存するスクリプト
-# 使い方例: uv run -m src.eval_on_sb3 --model_path models/sac_peristalsis_xxxx/best_model.zip --output_video output.mp4
+# 使い方例: uv run -m src.eval_on_sb3 --model_path models/sac_peristalsis_xxxx/best_model.zip
 
 import argparse
 import os
