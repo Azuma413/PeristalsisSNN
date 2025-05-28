@@ -1,11 +1,9 @@
 # 学習済みSACポリシーを使って環境を動作させ、動画を保存するスクリプト
-# 使い方例: uv run -m src.eval_on_sb3 --model_path models/sac_peristalsis_xxxx/best_model.zip
+# 使い方例: uv run -m src.eval_on_sb3 --model_path models/sac_peristalsis_xxxx/final_model.zip
 
 import argparse
-import os
-import numpy as np
 import imageio
-from stable_baselines3 import SAC
+from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 from src.env.peristal_env import PeristalsisEnv
 
@@ -38,7 +36,8 @@ def main():
     )])
 
     # モデルのロード
-    model = SAC.load(args.model_path, env=env)
+    # model = SAC.load(args.model_path, env=env)
+    model = PPO.load(args.model_path, env=env)
 
     obs = env.reset()
     frames = []

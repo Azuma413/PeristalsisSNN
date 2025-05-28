@@ -19,7 +19,7 @@ def train(model: str = "sac"):
     # --- 設定 ---
     config = {
         "policy_type": "MlpPolicy",
-        "total_timesteps": 10000000, # 総学習ステップ数
+        "total_timesteps": 2000000, # 総学習ステップ数
         "env_id": "PeristalsisEnv-v0",
         "axial_divisions": 5, # 環境の軸方向の分割数
         "img_height": 240, # 環境の観測画像の高さ (動画記録用)
