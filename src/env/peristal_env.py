@@ -238,7 +238,7 @@ class PeristalsisEnv(gym.Env):
 
     def close(self):
         """環境をクリーンアップ"""
-        if self.scene is not None:
+        if hasattr(self, "scene") and self.scene is not None:
             del self.scene
         gs.destroy()
 

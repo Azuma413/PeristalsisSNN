@@ -1,20 +1,20 @@
 # uv run -m src.train_on_stable_baselines3
 
 import os
-from stable_baselines3 import SAC
-from stable_baselines3.common.callbacks import EvalCallback, CallbackList
-from wandb.integration.sb3 import WandbCallback # WandbCallbackのインポート元を変更
+from stable_baselines3 import SAC, PPO
+from stable_baselines3.common.callbacks import CallbackList
+from wandb.integration.sb3 import WandbCallback
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecVideoRecorder
+from stable_baselines3.common.vec_env import DummyVecEnv
 import wandb
 from datetime import datetime
-import torch # torchをインポート
+import torch
+from src.env.peristal_env import PeristalsisEnv
 
-from src.env.peristal_env import PeristalsisEnv # type: ignore
-
-def train():
+def train(model: str = "sac"):
     """
-    PeristalsisEnv環境でSACエージェントを学習し、WandBにログを記録する関数
+    PeristalsisEnv環境でSACまたはPPOエージェントを学習し、WandBにログを記録する関数
+    model: "sac" または "ppo" を指定
     """
     # --- 設定 ---
     config = {
@@ -34,7 +34,7 @@ def train():
         "max_steps": 600, # 環境の最大ステップ数
     }
 
-    run_name = f"sac_peristalsis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"{model}_peristalsis_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     log_dir = f"logs/{run_name}"
 
     os.makedirs(log_dir, exist_ok=True)
@@ -64,22 +64,36 @@ def train():
 
     env = DummyVecEnv([make_env])
 
-    # --- SACモデルの定義 ---
+    # --- モデルの定義 ---
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = SAC(
-        config["policy_type"],
-        env,
-        learning_rate=config["sac_learning_rate"],
-        buffer_size=config["sac_buffer_size"],
-        batch_size=config["sac_batch_size"],
-        gamma=config["sac_gamma"],
-        tau=config["sac_tau"],
-        train_freq=config["sac_train_freq"],
-        gradient_steps=config["sac_gradient_steps"],
-        verbose=1,
-        tensorboard_log=log_dir, # WandBと同期するためにTensorBoardログも出力
-        device=device, # torch.cuda.is_available() を使用
-    )
+    if model == "sac":
+        agent = SAC(
+            config["policy_type"],
+            env,
+            learning_rate=config["sac_learning_rate"],
+            buffer_size=config["sac_buffer_size"],
+            batch_size=config["sac_batch_size"],
+            gamma=config["sac_gamma"],
+            tau=config["sac_tau"],
+            train_freq=config["sac_train_freq"],
+            gradient_steps=config["sac_gradient_steps"],
+            verbose=1,
+            tensorboard_log=log_dir,
+            device=device,
+        )
+    elif model == "ppo":
+        agent = PPO(
+            config["policy_type"],
+            env,
+            learning_rate=config["sac_learning_rate"],  # SACと同じ学習率を流用
+            batch_size=config["sac_batch_size"],
+            gamma=config["sac_gamma"],
+            verbose=1,
+            tensorboard_log=log_dir,
+            device=device,
+        )
+    else:
+        raise ValueError(f"未対応のmodel指定: {model}")
 
     # WandbCallback: 学習のメトリクス、ハイパーパラメータ、動画などをWandBにロギング
     wandb_callback = WandbCallback(
@@ -96,17 +110,17 @@ def train():
     print(f"学習を開始します。ログは {log_dir} に保存されます。")
     print(f"WandB Run: {run.url}")
     try:
-        model.learn(
+        agent.learn(
             total_timesteps=config["total_timesteps"],
             callback=callback_list,
-            log_interval=1, # ログ出力頻度 (エピソード数)
+            log_interval=1,
         )
     except Exception as e:
         print(f"学習中にエラーが発生しました: {e}")
     finally:
         # --- 学習済みモデルの保存 ---
         final_model_path = f"models/{run_name}/final_model.zip"
-        model.save(final_model_path)
+        agent.save(final_model_path)
         print(f"最終モデルを {final_model_path} に保存しました。")
 
         # --- WandBの終了 ---
@@ -115,4 +129,5 @@ def train():
         env.close()
 
 if __name__ == "__main__":
-    train()
+    # 例: "sac" または "ppo" を指定
+    train("ppo")
